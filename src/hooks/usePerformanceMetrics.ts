@@ -2,9 +2,10 @@ import { useState, useEffect } from 'react';
 import { io } from 'socket.io-client';
 import { SystemMetrics, SystemInfoData } from '../types';
 
+//web sockets connections
 const SOCKET_URL = 'http://localhost:3000';
 const socket = io(SOCKET_URL, {
-  transports: ['websocket'], // Ensure WebSocket connection
+  transports: ['websocket'], 
   reconnection: true,
   reconnectionAttempts: 5,
   reconnectionDelay: 1000
@@ -17,25 +18,25 @@ export function usePerformanceMetrics() {
   const [isConnected, setIsConnected] = useState(false);
 
   useEffect(() => {
-    // Setup Performance Observer for network requests
+    // performance observer
     const observer = new PerformanceObserver((list) => {
       const entries = list.getEntries().map(entry => ({
         url: entry.name,
         duration: entry.duration,
         timestamp: Date.now()
       }));
-
-      setNetworkRequests(prev => [...prev, ...entries].slice(-10)); // Keep only the last 10
+//for now we are only taking the last 10 req
+      setNetworkRequests(prev => [...prev, ...entries].slice(-10)); 
     });
 
     observer.observe({ entryTypes: ['resource', 'navigation'] });
 
-    // WebSocket Event Handlers
+    // Event handlers
     const handleConnect = () => setIsConnected(true);
     const handleDisconnect = () => setIsConnected(false);
     const handleSystemInfo = (info: SystemInfoData) => setSystemInfo(info);
     const handleMetrics = (newMetrics: SystemMetrics) => {
-      setMetrics(prev => [...prev, newMetrics].slice(-20)); // Keep last 20 updates
+      setMetrics(prev => [...prev, newMetrics].slice(-20)); 
     };
 
     socket.on('connect', handleConnect);

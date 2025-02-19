@@ -36,11 +36,11 @@ function getCpuUsage() {
         usage: cpuPercentages,
         averageUsage: cpuPercentages.reduce((acc, usage) => acc + usage, 0) / cpuPercentages.length
       });
-    }, 1000); // Measure CPU usage over 1 second
+    }, 1000); 
   });
 }
 
-// Function to get system metrics
+// these are the functions to get the system metrics
 async function getSystemMetrics() {
   const totalMemory = os.totalmem();
   const freeMemory = os.freemem();
@@ -52,7 +52,7 @@ async function getSystemMetrics() {
     percentage: (usedMemory / totalMemory) * 100
   };
 
-  const cpuData = await getCpuUsage(); // Wait for CPU usage calculation
+  const cpuData = await getCpuUsage(); 
 
   return {
     timestamp: Date.now(),
@@ -74,7 +74,7 @@ io.on('connection', (socket) => {
     arch: os.arch()
   });
 
-  // Send metrics every second
+
   const metricsInterval = setInterval(async () => {
     const metrics = await getSystemMetrics();
     socket.emit('metrics', metrics);
