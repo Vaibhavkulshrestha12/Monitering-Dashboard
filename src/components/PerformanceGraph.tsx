@@ -24,11 +24,8 @@ export function PerformanceGraph({ data }: PerformanceGraphProps) {
             <Tooltip 
               labelFormatter={(timestamp) => new Date(timestamp).toLocaleTimeString()}
               formatter={(value: number, name: string) => {
-                if (name === "Memory Usage") {
-                  return [`${value.toFixed(2)}%`, "Memory Usage"];
-                }
-                if (name === "CPU Usage") {
-                  return [`${value.toFixed(2)}%`, "CPU Usage"];
+                if (name.includes("Usage")) {
+                  return [`${value.toFixed(2)}%`, name];
                 }
                 return [value, name];
               }}
@@ -50,6 +47,17 @@ export function PerformanceGraph({ data }: PerformanceGraphProps) {
               dot={false} 
               strokeWidth={2}
             />
+            {data[0]?.gpu?.usage.map((_, index) => (
+              <Line
+                key={`gpu-${index}`}
+                type="monotone"
+                dataKey={`gpu.usage[${index}]`}
+                stroke={`#${Math.floor(Math.random()*16777215).toString(16)}`}
+                name={`GPU ${index + 1} Usage`}
+                dot={false}
+                strokeWidth={2}
+              />
+            ))}
           </LineChart>
         </ResponsiveContainer>
       </div>
