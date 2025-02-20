@@ -27,7 +27,7 @@ export function ProcessManager({ processes, onKillProcess, cpuThreshold, memoryT
       
       // Ensure the values are defined
       if (aValue === undefined || bValue === undefined) {
-        return 0; // Or handle this case as needed
+        return 0; 
       }
 
       return sortDirection === 'asc' 
