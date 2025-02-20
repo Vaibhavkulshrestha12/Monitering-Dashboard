@@ -1,11 +1,12 @@
-# Cpu -performance Dashboard 
+# System -performance Dashboard 
 
 This project is built on the Vite build with a React TSX template. It uses the `recharts` library and the `os` library of Node.js to generate real-time system monitoring graphs where you can check your memory and CPU consumption. It uses WebSocket for real-time changes.
 
 ## Features
 
-- Real-time system monitoring
+- Real-time system monitoring 
 - Memory and CPU consumption graphs
+- Gpu and process monitoring
 - Built with Vite and React TSX
 - Uses WebSocket for real-time updates
 
