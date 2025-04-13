@@ -1,104 +1,83 @@
 import { SystemInfoData } from '../types';
-import { Cpu, Server, Hash, Monitor, Gauge } from 'lucide-react';
+import { Cpu, Server, MemoryStick as Memory, Cpu as Gpu } from 'lucide-react';
 
 interface SystemInfoProps {
-  info: SystemInfoData | null;
-  isConnected: boolean;
+  info: SystemInfoData;
+  darkMode: boolean;
 }
 
-export function SystemInfo({ info, isConnected }: SystemInfoProps) {
-  if (!info) return null;
+export function SystemInfo({ info, darkMode }: SystemInfoProps) {
+  const formatBytes = (bytes: number) => {
+    const gb = bytes / (1024 * 1024 * 1024);
+    return `${gb.toFixed(1)} GB`;
+  };
 
   return (
-    <div className="bg-white rounded-lg shadow p-6 mb-8">
-      <div className="flex items-center justify-between mb-4">
-        <h2 className="text-xl font-semibold">System Information</h2>
-        <div className="flex items-center gap-2">
-          <span className="text-sm">Status:</span>
-          <div className={`w-3 h-3 rounded-full ${isConnected ? 'bg-green-500' : 'bg-red-500'}`} />
-          <span className="text-sm">{isConnected ? 'Connected' : 'Disconnected'}</span>
-        </div>
-      </div>
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
-        <div className="flex items-center gap-3">
-          <Cpu className="w-5 h-5 text-indigo-600" />
-          <div>
-            <p className="text-sm text-gray-500">CPU Cores</p>
-            <p className="font-semibold">{info.cpuCores}</p>
+    <div className={`p-6 rounded-xl ${darkMode ? 'bg-[#1E2433]' : 'bg-white'} shadow-lg mb-6`}>
+      <h2 className="text-xl font-semibold mb-4 flex items-center gap-2">
+        <Server className="w-5 h-5 text-indigo-500" />
+        System Information
+      </h2>
+
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+        {/* CPU Information */}
+        <div className="space-y-2">
+          <div className="flex items-center gap-2 mb-2">
+            <Cpu className="w-4 h-4 text-indigo-500" />
+            <h3 className="font-medium">CPU</h3>
+          </div>
+          <div className="space-y-1 text-sm">
+            <p><span className="text-gray-500">Manufacturer:</span> {info.cpu.manufacturer}</p>
+            <p><span className="text-gray-500">Model:</span> {info.cpu.brand}</p>
+            <p><span className="text-gray-500">Cores:</span> {info.cpu.physicalCores} (Physical) / {info.cpu.cores} (Logical)</p>
+            <p><span className="text-gray-500">Base Speed:</span> {info.cpu.speed} GHz</p>
           </div>
         </div>
-        <div className="flex items-center gap-3">
-          <Server className="w-5 h-5 text-indigo-600" />
-          <div>
-            <p className="text-sm text-gray-500">Platform</p>
-            <p className="font-semibold">{info.platform}</p>
+
+        {/* Memory Information */}
+        <div className="space-y-2">
+          <div className="flex items-center gap-2 mb-2">
+            <Memory className="w-4 h-4 text-indigo-500" />
+            <h3 className="font-medium">Memory</h3>
+          </div>
+          <div className="space-y-1 text-sm">
+            <p><span className="text-gray-500">Total RAM:</span> {formatBytes(info.memory.total)}</p>
+            <p><span className="text-gray-500">Used RAM:</span> {formatBytes(info.memory.used)}</p>
+            <p><span className="text-gray-500">Cache Memory:</span> {formatBytes(info.memory.cacheMemory)}</p>
+            <p><span className="text-gray-500">Swap:</span> {formatBytes(info.memory.swapUsed)} / {formatBytes(info.memory.swapTotal)}</p>
           </div>
         </div>
-        <div className="flex items-center gap-3">
-          <Monitor className="w-5 h-5 text-indigo-600" />
-          <div>
-            <p className="text-sm text-gray-500">Hostname</p>
-            <p className="font-semibold">{info.hostname}</p>
+
+        {/* Operating System */}
+        <div className="space-y-2">
+          <div className="flex items-center gap-2 mb-2">
+            <Server className="w-4 h-4 text-indigo-500" />
+            <h3 className="font-medium">Operating System</h3>
+          </div>
+          <div className="space-y-1 text-sm">
+            <p><span className="text-gray-500">Platform:</span> {info.os.platform}</p>
+            <p><span className="text-gray-500">Distribution:</span> {info.os.distro}</p>
+            <p><span className="text-gray-500">Release:</span> {info.os.release}</p>
+            <p><span className="text-gray-500">Architecture:</span> {info.os.arch}</p>
           </div>
         </div>
-        <div className="flex items-center gap-3">
-          <Hash className="w-5 h-5 text-indigo-600" />
-          <div>
-            <p className="text-sm text-gray-500">Architecture</p>
-            <p className="font-semibold">{info.arch}</p>
+
+        {/* GPU Information */}
+        <div className="space-y-2">
+          <div className="flex items-center gap-2 mb-2">
+            <Gpu className="w-4 h-4 text-indigo-500" />
+            <h3 className="font-medium">Graphics</h3>
           </div>
-        </div>
-      </div>
-      
-      <div className="border-t pt-4">
-        <h3 className="text-lg font-semibold mb-4 flex items-center gap-2">
-          <Gauge className="w-5 h-5 text-indigo-600" />
-          GPU Information
-        </h3>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          {info.gpus.map((gpu, index) => (
-            <div key={index} className="bg-gray-50 rounded-lg p-4">
-              <div className="flex justify-between items-start mb-2">
-                <h4 className="font-medium">{gpu.name}</h4>
-                <span className={`px-2 py-1 rounded-full text-xs font-medium ${
-                  gpu.type === 'dedicated' ? 'bg-purple-100 text-purple-800' : 'bg-blue-100 text-blue-800'
-                }`}>
-                  {gpu.type}
-                </span>
+          <div className="space-y-3 text-sm">
+            {info.gpu.map((gpu, index) => (
+              <div key={index} className="space-y-1">
+                <p><span className="text-gray-500">Model:</span> {gpu.model}</p>
+                <p><span className="text-gray-500">Vendor:</span> {gpu.vendor}</p>
+                <p><span className="text-gray-500">VRAM:</span> {gpu.vram} MB</p>
+                <p><span className="text-gray-500">Driver:</span> {gpu.driver}</p>
               </div>
-              <div className="space-y-2">
-                <p className="text-sm text-gray-600">
-                  Vendor: {gpu.vendor}
-                </p>
-                <p className="text-sm text-gray-600">
-                  Memory: {(gpu.memoryUsed / 1024).toFixed(2)}GB / {(gpu.memoryTotal / 1024).toFixed(2)}GB
-                </p>
-                {gpu.temperature && (
-                  <p className="text-sm text-gray-600">
-                    Temperature: {gpu.temperature}°C
-                  </p>
-                )}
-                <p className="text-sm text-gray-600">
-                  Usage: {gpu.usage.toFixed(1)}%
-                </p>
-                {gpu.fanSpeed && (
-                  <p className="text-sm text-gray-600">
-                    Fan Speed: {gpu.fanSpeed}%
-                  </p>
-                )}
-                {gpu.clockCore && (
-                  <p className="text-sm text-gray-600">
-                    Core Clock: {gpu.clockCore}MHz
-                  </p>
-                )}
-                {gpu.clockMemory && (
-                  <p className="text-sm text-gray-600">
-                    Memory Clock: {gpu.clockMemory}MHz
-                  </p>
-                )}
-              </div>
-            </div>
-          ))}
+            ))}
+          </div>
         </div>
       </div>
     </div>

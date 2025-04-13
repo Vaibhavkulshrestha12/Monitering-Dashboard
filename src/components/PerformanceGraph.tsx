@@ -1,14 +1,30 @@
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
-import { SystemMetrics } from '../types';
+import { SystemMetrics, ComponentWithDarkMode } from '../types';
 
-interface PerformanceGraphProps {
+interface PerformanceGraphProps extends ComponentWithDarkMode {
   data: SystemMetrics[];
 }
 
-export function PerformanceGraph({ data }: PerformanceGraphProps) {
+export function PerformanceGraph({ data, darkMode }: PerformanceGraphProps) {
+  const baseClasses = darkMode ? {
+    container: 'bg-gray-800 text-white',
+    title: 'text-white',
+    chart: {
+      backgroundColor: '#1f2937',
+      textColor: '#ffffff'
+    }
+  } : {
+    container: 'bg-white text-gray-900',
+    title: 'text-gray-900',
+    chart: {
+      backgroundColor: '#ffffff',
+      textColor: '#000000'
+    }
+  };
+
   return (
-    <div className="bg-white rounded-lg shadow p-6 mb-8">
-      <h2 className="text-xl font-semibold mb-4">System Performance</h2>
+    <div className={`rounded-lg shadow p-6 mb-8 ${baseClasses.container}`}>
+      <h2 className={`text-xl font-semibold mb-4 ${baseClasses.title}`}>System Performance</h2>
       <div className="h-80">
         <ResponsiveContainer width="100%" height="100%">
           <LineChart data={data}>
@@ -17,9 +33,11 @@ export function PerformanceGraph({ data }: PerformanceGraphProps) {
               dataKey="timestamp" 
               tickFormatter={(timestamp) => new Date(timestamp).toLocaleTimeString()} 
               label={{ value: "Time", position: "insideBottomRight", offset: -5 }}
+              stroke={baseClasses.chart.textColor}
             />
             <YAxis 
               label={{ value: "Usage (%)", angle: -90, position: "insideLeft" }} 
+              stroke={baseClasses.chart.textColor}
             />
             <Tooltip 
               labelFormatter={(timestamp) => new Date(timestamp).toLocaleTimeString()}
@@ -28,6 +46,11 @@ export function PerformanceGraph({ data }: PerformanceGraphProps) {
                   return [`${value.toFixed(2)}%`, name];
                 }
                 return [value, name];
+              }}
+              contentStyle={{
+                backgroundColor: baseClasses.chart.backgroundColor,
+                color: baseClasses.chart.textColor,
+                border: 'none'
               }}
             />
             <Legend />

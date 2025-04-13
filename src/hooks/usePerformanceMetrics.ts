@@ -1,62 +1,125 @@
-import { useState, useEffect } from 'react';
-import { io } from 'socket.io-client';
+import { useState, useEffect, useRef } from 'react';
+import { io, Socket } from 'socket.io-client';
 import { SystemMetrics, SystemInfoData } from '../types';
 
-//web sockets connections
 const SOCKET_URL = 'http://localhost:3000';
-const socket = io(SOCKET_URL, {
-  transports: ['websocket'], 
-  reconnection: true,
-  reconnectionAttempts: 5,
-  reconnectionDelay: 1000
-});
+const MAX_METRICS_HISTORY = 30;
+const RECONNECT_DELAY = 5000;
+const MAX_RECONNECT_ATTEMPTS = 3;
+const METRICS_UPDATE_INTERVAL = 3000; // Increased to 3 seconds
 
 export function usePerformanceMetrics() {
   const [metrics, setMetrics] = useState<SystemMetrics[]>([]);
   const [systemInfo, setSystemInfo] = useState<SystemInfoData | null>(null);
-  const [networkRequests, setNetworkRequests] = useState<any[]>([]);
   const [isConnected, setIsConnected] = useState(false);
+  const socketRef = useRef<Socket | null>(null);
+  const reconnectAttempts = useRef(0);
+  const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   useEffect(() => {
-    // performance observer
-    const observer = new PerformanceObserver((list) => {
-      const entries = list.getEntries().map(entry => ({
-        url: entry.name,
-        duration: entry.duration,
-        timestamp: Date.now()
-      }));
-//for now we are only taking the last 10 req
-      setNetworkRequests(prev => [...prev, ...entries].slice(-10)); 
-    });
+    const connectSocket = () => {
+      if (socketRef.current?.connected) return;
 
-    observer.observe({ entryTypes: ['resource', 'navigation'] });
+      const socket = io(SOCKET_URL, {
+        transports: ['websocket'],
+        reconnection: false,
+        timeout: 10000, // Increased timeout
+        forceNew: true
+      });
 
-    // Event handlers
-    const handleConnect = () => setIsConnected(true);
-    const handleDisconnect = () => setIsConnected(false);
-    const handleSystemInfo = (info: SystemInfoData) => setSystemInfo(info);
-    const handleMetrics = (newMetrics: SystemMetrics) => {
-      setMetrics(prev => [...prev, newMetrics].slice(-20)); 
+      socketRef.current = socket;
+
+      socket.on('connect', () => {
+        console.log('WebSocket connected');
+        setIsConnected(true);
+        reconnectAttempts.current = 0;
+        if (reconnectTimeoutRef.current) {
+          clearTimeout(reconnectTimeoutRef.current);
+          reconnectTimeoutRef.current = null;
+        }
+      });
+
+      socket.on('disconnect', () => {
+        console.log('WebSocket disconnected');
+        setIsConnected(false);
+        handleReconnect();
+      });
+
+      socket.on('connect_error', (error) => {
+        console.error('Connection error:', error);
+        setIsConnected(false);
+        handleReconnect();
+      });
+
+      socket.on('systemInfo', (info: SystemInfoData) => {
+        setSystemInfo(info);
+      });
+
+      socket.on('metrics', (newMetrics: SystemMetrics) => {
+        setMetrics(prev => {
+          const updated = [...prev, {
+            ...newMetrics,
+            cpu: {
+              ...newMetrics.cpu,
+              averageUsage: parseFloat(newMetrics.cpu.averageUsage.toFixed(1)),
+              threadUsage: newMetrics.cpu.threadUsage.map(usage => 
+                parseFloat(Math.min(usage, 100).toFixed(1))
+              )
+            },
+            memory: {
+              ...newMetrics.memory,
+              percentage: parseFloat(((newMetrics.memory.used / newMetrics.memory.total) * 100).toFixed(1))
+            }
+          }];
+          return updated.slice(-MAX_METRICS_HISTORY);
+        });
+      });
+
+      return socket;
     };
 
-    socket.on('connect', handleConnect);
-    socket.on('disconnect', handleDisconnect);
-    socket.on('systemInfo', handleSystemInfo);
-    socket.on('metrics', handleMetrics);
+    const handleReconnect = () => {
+      if (reconnectAttempts.current >= MAX_RECONNECT_ATTEMPTS) {
+        console.log('Max reconnection attempts reached');
+        return;
+      }
+
+      const delay = RECONNECT_DELAY * Math.pow(2, reconnectAttempts.current);
+      console.log(`Attempting reconnect in ${delay}ms`);
+
+      if (reconnectTimeoutRef.current) {
+        clearTimeout(reconnectTimeoutRef.current);
+      }
+
+      reconnectTimeoutRef.current = setTimeout(() => {
+        reconnectAttempts.current += 1;
+        console.log(`Reconnection attempt ${reconnectAttempts.current}/${MAX_RECONNECT_ATTEMPTS}`);
+        
+        if (socketRef.current) {
+          socketRef.current.connect();
+        } else {
+          connectSocket();
+        }
+      }, delay);
+    };
+
+    const socket = connectSocket();
 
     return () => {
-      observer.disconnect();
-      socket.off('connect', handleConnect);
-      socket.off('disconnect', handleDisconnect);
-      socket.off('systemInfo', handleSystemInfo);
-      socket.off('metrics', handleMetrics);
+      if (reconnectTimeoutRef.current) {
+        clearTimeout(reconnectTimeoutRef.current);
+      }
+      if (socket) {
+        socket.removeAllListeners();
+        socket.close();
+        socketRef.current = null;
+      }
     };
   }, []);
 
   return {
     metrics,
     systemInfo,
-    networkRequests,
     isConnected
   };
 }
