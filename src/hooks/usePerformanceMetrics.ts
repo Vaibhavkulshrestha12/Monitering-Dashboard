@@ -4,9 +4,8 @@ import { SystemMetrics, SystemInfoData } from '../types';
 
 const SOCKET_URL = 'http://localhost:3000';
 const MAX_METRICS_HISTORY = 30;
-const RECONNECT_DELAY = 5000;
+const RECONNECT_DELAY = 2000;
 const MAX_RECONNECT_ATTEMPTS = 3;
-const METRICS_UPDATE_INTERVAL = 3000; // Increased to 3 seconds
 
 export function usePerformanceMetrics() {
   const [metrics, setMetrics] = useState<SystemMetrics[]>([]);
@@ -18,35 +17,24 @@ export function usePerformanceMetrics() {
 
   useEffect(() => {
     const connectSocket = () => {
-      if (socketRef.current?.connected) return;
+      if (socketRef.current?.connected) {
+        return;
+      }
 
       const socket = io(SOCKET_URL, {
         transports: ['websocket'],
         reconnection: false,
-        timeout: 10000, // Increased timeout
-        forceNew: true
+        timeout: 5000
       });
-
-      socketRef.current = socket;
 
       socket.on('connect', () => {
         console.log('WebSocket connected');
         setIsConnected(true);
         reconnectAttempts.current = 0;
-        if (reconnectTimeoutRef.current) {
-          clearTimeout(reconnectTimeoutRef.current);
-          reconnectTimeoutRef.current = null;
-        }
       });
 
       socket.on('disconnect', () => {
         console.log('WebSocket disconnected');
-        setIsConnected(false);
-        handleReconnect();
-      });
-
-      socket.on('connect_error', (error) => {
-        console.error('Connection error:', error);
         setIsConnected(false);
         handleReconnect();
       });
@@ -56,36 +44,38 @@ export function usePerformanceMetrics() {
       });
 
       socket.on('metrics', (newMetrics: SystemMetrics) => {
-        setMetrics(prev => {
-          const updated = [...prev, {
+        setMetrics((prevMetrics) => {
+          const updatedMetrics = [...prevMetrics, {
             ...newMetrics,
             cpu: {
               ...newMetrics.cpu,
-              averageUsage: parseFloat(newMetrics.cpu.averageUsage.toFixed(1)),
+              averageUsage: Math.min(newMetrics.cpu.averageUsage, 100),
               threadUsage: newMetrics.cpu.threadUsage.map(usage => 
-                parseFloat(Math.min(usage, 100).toFixed(1))
+                Math.min(usage, 100)
               )
             },
             memory: {
               ...newMetrics.memory,
-              percentage: parseFloat(((newMetrics.memory.used / newMetrics.memory.total) * 100).toFixed(1))
+              percentage: Math.min(
+                (newMetrics.memory.used / newMetrics.memory.total) * 100,
+                100
+              )
             }
           }];
-          return updated.slice(-MAX_METRICS_HISTORY);
+
+          return updatedMetrics.slice(-MAX_METRICS_HISTORY);
         });
       });
 
+      socketRef.current = socket;
       return socket;
     };
 
     const handleReconnect = () => {
       if (reconnectAttempts.current >= MAX_RECONNECT_ATTEMPTS) {
-        console.log('Max reconnection attempts reached');
+        console.log(`Reconnection attempts (${MAX_RECONNECT_ATTEMPTS}) exceeded`);
         return;
       }
-
-      const delay = RECONNECT_DELAY * Math.pow(2, reconnectAttempts.current);
-      console.log(`Attempting reconnect in ${delay}ms`);
 
       if (reconnectTimeoutRef.current) {
         clearTimeout(reconnectTimeoutRef.current);
@@ -100,7 +90,7 @@ export function usePerformanceMetrics() {
         } else {
           connectSocket();
         }
-      }, delay);
+      }, RECONNECT_DELAY);
     };
 
     const socket = connectSocket();
@@ -110,16 +100,11 @@ export function usePerformanceMetrics() {
         clearTimeout(reconnectTimeoutRef.current);
       }
       if (socket) {
-        socket.removeAllListeners();
-        socket.close();
+        socket.disconnect();
         socketRef.current = null;
       }
     };
   }, []);
 
-  return {
-    metrics,
-    systemInfo,
-    isConnected
-  };
+  return { metrics, systemInfo, isConnected };
 }
