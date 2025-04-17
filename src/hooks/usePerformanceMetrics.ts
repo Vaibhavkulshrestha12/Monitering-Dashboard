@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { io, Socket } from 'socket.io-client';
-import { SystemMetrics, SystemInfoData } from '../types';
+import { SystemMetrics, SystemInfoData, ProcessInfo } from '../types';
 
 const SOCKET_URL = 'http://localhost:3000';
 const MAX_METRICS_HISTORY = 30;
@@ -11,6 +11,7 @@ export function usePerformanceMetrics() {
   const [metrics, setMetrics] = useState<SystemMetrics[]>([]);
   const [systemInfo, setSystemInfo] = useState<SystemInfoData | null>(null);
   const [isConnected, setIsConnected] = useState(false);
+  const [processes, setProcesses] = useState<ProcessInfo[]>([]);
   const socketRef = useRef<Socket | null>(null);
   const reconnectAttempts = useRef(0);
   const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null);
@@ -60,11 +61,27 @@ export function usePerformanceMetrics() {
                 (newMetrics.memory.used / newMetrics.memory.total) * 100,
                 100
               )
-            }
+            },
+            // Keep existing processes from our separate state
+            processes: processes
           }];
 
           return updatedMetrics.slice(-MAX_METRICS_HISTORY);
         });
+      });
+
+      // Handle process data updates
+      socket.on('processData', (processData: ProcessInfo[]) => {
+        setProcesses(processData);
+      });
+
+      // Handle process killed event
+      socket.on('processKilled', (pid: number) => {
+        console.log(`Process ${pid} was terminated`);
+        // Remove the process from our local state immediately
+        setProcesses(prev => prev.filter(p => p.pid !== pid));
+        // Request fresh processes
+        socket.emit('requestProcesses');
       });
 
       socketRef.current = socket;
@@ -104,7 +121,28 @@ export function usePerformanceMetrics() {
         socketRef.current = null;
       }
     };
-  }, []);
+  }, [processes]);
 
-  return { metrics, systemInfo, isConnected };
+  // Function to request processes from the server
+  const requestProcesses = () => {
+    if (socketRef.current?.connected) {
+      socketRef.current.emit('requestProcesses');
+    }
+  };
+
+  // Function to notify server about killed process
+  const notifyProcessKilled = (pid: number) => {
+    if (socketRef.current?.connected) {
+      socketRef.current.emit('processKilled', pid);
+    }
+  };
+
+  return { 
+    metrics, 
+    systemInfo, 
+    isConnected, 
+    processes, 
+    requestProcesses,
+    notifyProcessKilled
+  };
 }

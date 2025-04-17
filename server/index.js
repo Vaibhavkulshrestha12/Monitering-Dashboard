@@ -30,10 +30,13 @@ const io = new Server(httpServer, {
   maxHttpBufferSize: 1e6 
 });
 
-let processOffset = 0;
+let processCache = null;
+let processCacheTime = 0;
 let metricsCache = null;
 let metricsCacheTime = 0;
 let activeConnections = new Set();
+let processesRequested = false;
+const PROCESS_CACHE_DURATION = 30000; // 30 seconds process cache to reduce load
 
 // Lightweight process check
 async function isProcessRunning(pid) {
@@ -91,17 +94,21 @@ async function getSystemInfo() {
   }
 }
 
-async function getProcesses() {
+async function getProcesses(forceRefresh = false) {
+  const now = Date.now();
+  
+  // Return cached processes if available and not forced to refresh
+  if (!forceRefresh && processCache && (now - processCacheTime) < PROCESS_CACHE_DURATION) {
+    return processCache;
+  }
+
   try {
     const processes = await si.processes();
     const users = await si.users();
     const totalMem = os.totalmem();
     const userMap = new Map(users.map(user => [user.pid, user.user]));
 
-    // Rotate through processes
-    processOffset = (processOffset + PROCESS_LIMIT) % Math.max(processes.list.length, PROCESS_LIMIT);
-
-    return processes.list
+    const filteredProcesses = processes.list
       .filter(process => process.cpu > 0.1 || process.memRss > totalMem * 0.001) // Filter out very low resource processes
       .map(process => ({
         pid: process.pid,
@@ -116,10 +123,16 @@ async function getProcesses() {
         path: process.path || ''
       }))
       .sort((a, b) => b.cpu - a.cpu || b.memory - a.memory)
-      .slice(processOffset, processOffset + PROCESS_LIMIT);
+      .slice(0, PROCESS_LIMIT); // Take top resource-consuming processes
+      
+    processCache = filteredProcesses;
+    processCacheTime = now;
+    processesRequested = false;
+    
+    return filteredProcesses;
   } catch (error) {
     console.error('Error getting process list:', error);
-    return [];
+    return processCache || [];
   }
 }
 
@@ -139,7 +152,9 @@ async function getMetrics(force = false) {
       si.cpuTemperature()
     ]);
 
-    const processes = await getProcesses();
+    // For regular metrics, use a placeholder for processes to avoid load
+    // Real process data will be sent separately when requested
+    const processes = [];
 
     const metrics = {
       timestamp: now,
@@ -216,6 +231,26 @@ io.on('connection', async (socket) => {
       }
     }, METRIC_INTERVAL);
 
+    // Handle process data requests
+    socket.on('requestProcesses', async () => {
+      if (!processesRequested) {
+        processesRequested = true;
+        const processes = await getProcesses(true);
+        socket.emit('processData', processes);
+      } else {
+        // If processes were already requested, send the cached version
+        socket.emit('processData', processCache || []);
+      }
+    });
+
+    // Handle process kill notification
+    socket.on('processKilled', async (pid) => {
+      console.log(`Process killed: ${pid}`);
+      processesRequested = false; // Reset the flag to allow refresh
+      const processes = await getProcesses(true);
+      io.emit('processData', processes); // Broadcast to all clients
+    });
+
   } catch (error) {
     console.error('Error in socket connection:', error);
   }
@@ -272,6 +307,15 @@ app.delete('/process/:pid', async (req, res) => {
       } catch (e) {
         // Process already terminated
       }
+      
+      // Reset process request flag to allow refreshing the list
+      processesRequested = false;
+      
+      // Refresh the process cache
+      await getProcesses(true);
+      
+      // Notify all clients that a process was killed
+      io.emit('processKilled', pid);
     }, 1000);
 
     res.json({ success: true });

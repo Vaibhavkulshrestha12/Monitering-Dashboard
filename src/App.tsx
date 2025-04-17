@@ -1,5 +1,5 @@
-import { useState } from 'react';
-import { BrowserRouter, Routes, Route } from 'react-router-dom';
+import { useState, useEffect } from 'react';
+import { BrowserRouter, Routes, Route, useLocation } from 'react-router-dom';
 import { Layout } from './components/Layout';
 import { Dashboard } from './pages/Dashboard';
 import { ProcessManager } from './components/ProcessManager';
@@ -9,21 +9,41 @@ import { usePerformanceMetrics } from './hooks/usePerformanceMetrics';
 const CPU_THRESHOLD = 80;
 const MEMORY_THRESHOLD = 90;
 
+// Define a type for the onRouteChange prop
+interface RouteChangeObserverProps {
+  onRouteChange: (path: string) => void;
+}
+
+// Location observer component to detect route changes
+function RouteChangeObserver({ onRouteChange }: RouteChangeObserverProps) {
+  const location = useLocation();
+  
+  useEffect(() => {
+    onRouteChange(location.pathname);
+  }, [location, onRouteChange]);
+  
+  return null;
+}
+
 function App() {
   const [darkMode, setDarkMode] = useState(() => {
     const savedMode = localStorage.getItem('darkMode');
     return savedMode ? JSON.parse(savedMode) : true;
   });
   
-  const { metrics, isConnected } = usePerformanceMetrics();
-  const latestMetrics = metrics[metrics.length - 1];
-
-  const toggleDarkMode = () => {
-    setDarkMode((prev: boolean) => {
-      const newMode = !prev;
-      localStorage.setItem('darkMode', JSON.stringify(newMode));
-      return newMode;
-    });
+  const { 
+    // metrics is not being used, so we can exclude it from destructuring
+    isConnected, 
+    processes, 
+    requestProcesses, 
+    notifyProcessKilled 
+  } = usePerformanceMetrics();
+  
+  const handleRouteChange = (path: string) => {
+    // Request processes data only when navigating to the processes page
+    if (path === '/processes') {
+      requestProcesses();
+    }
   };
 
   const handleKillProcess = async (pid: number) => {
@@ -38,28 +58,38 @@ function App() {
       if (!response.ok) {
         throw new Error('Failed to terminate process');
       }
+      
+      // Notify our hook about the killed process
+      notifyProcessKilled(pid);
     } catch (error) {
       console.error('Error terminating process:', error);
     }
   };
 
+  const toggleDarkMode = () => {
+    setDarkMode((prev: boolean) => {
+      const newMode = !prev;
+      localStorage.setItem('darkMode', JSON.stringify(newMode));
+      return newMode;
+    });
+  };
+
   return (
     <BrowserRouter>
+      <RouteChangeObserver onRouteChange={handleRouteChange} />
       <Layout darkMode={darkMode} toggleDarkMode={toggleDarkMode}>
         <Routes>
           <Route path="/" element={<Dashboard darkMode={darkMode} />} />
           <Route 
             path="/processes" 
             element={
-              latestMetrics && (
-                <ProcessManager
-                  processes={latestMetrics.processes}
-                  onKillProcess={handleKillProcess}
-                  cpuThreshold={CPU_THRESHOLD}
-                  memoryThreshold={MEMORY_THRESHOLD}
-                  darkMode={darkMode}
-                />
-              )
+              <ProcessManager
+                processes={processes}
+                onKillProcess={handleKillProcess}
+                cpuThreshold={CPU_THRESHOLD}
+                memoryThreshold={MEMORY_THRESHOLD}
+                darkMode={darkMode}
+              />
             } 
           />
           <Route path="/disk" element={<DiskUsage darkMode={darkMode} />} />
@@ -91,6 +121,15 @@ function App() {
                     }`}>
                       {isConnected ? 'Connected' : 'Disconnected'}
                     </span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span>Process Monitor</span>
+                    <button
+                      onClick={requestProcesses}
+                      className={`px-4 py-2 rounded-lg bg-indigo-600 text-white hover:bg-indigo-700`}
+                    >
+                      Refresh Processes
+                    </button>
                   </div>
                 </div>
               </div>
