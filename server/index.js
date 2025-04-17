@@ -6,35 +6,52 @@ import si from 'systeminformation';
 import cors from 'cors';
 
 const app = express();
+const METRIC_INTERVAL = 2000; // Increased to 2 seconds to reduce CPU load
+const PROCESS_LIMIT = 10;
+const CACHE_DURATION = 1000; // Increased cache duration to 1 second
+
 app.use(cors({
   origin: 'http://localhost:5173',
   methods: ['GET', 'POST', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type']
+  allowedHeaders: ['Content-Type', 'Authorization']
 }));
 
 const httpServer = createServer(app);
 const io = new Server(httpServer, {
   cors: {
-    origin: "http://localhost:5173",
-    methods: ["GET", "POST", "DELETE", "OPTIONS"],
-    allowedHeaders: ["Content-Type"]
+    origin: 'http://localhost:5173',
+    methods: ['GET', 'POST', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization']
   },
-  pingTimeout: 10000,
-  pingInterval: 5000
+  pingTimeout: 30000, 
+  pingInterval: 10000, 
+  transports: ['websocket'], 
+  allowUpgrades: false, 
+  maxHttpBufferSize: 1e6 
 });
 
-// Optimize cache duration
-const CACHE_DURATION = 2000; // 2 second cache
+let processOffset = 0;
 let metricsCache = null;
 let metricsCacheTime = 0;
+let activeConnections = new Set();
+
+// Lightweight process check
+async function isProcessRunning(pid) {
+  try {
+    return process.kill(pid, 0);
+  } catch (e) {
+    return e.code === 'EPERM';
+  }
+}
 
 async function getSystemInfo() {
   try {
-    const [cpu, mem, osInfo, graphics] = await Promise.all([
+    const [cpu, mem, osInfo, graphics, cpuTemp] = await Promise.all([
       si.cpu(),
       si.mem(),
       si.osInfo(),
-      si.graphics()
+      si.graphics(),
+      si.cpuTemperature()
     ]);
 
     return {
@@ -43,7 +60,8 @@ async function getSystemInfo() {
         brand: cpu.brand,
         physicalCores: cpu.physicalCores,
         cores: cpu.cores,
-        speed: cpu.speed
+        speed: cpu.speed,
+        temperature: cpuTemp.main || null
       },
       memory: {
         total: mem.total,
@@ -73,107 +91,39 @@ async function getSystemInfo() {
   }
 }
 
-async function getDiskInfo() {
+async function getProcesses() {
   try {
-    const [fsSize, blockDevices] = await Promise.all([
-      si.fsSize(),
-      si.blockDevices()
-    ]);
-
-    const devices = new Map(blockDevices.map(device => [device.mount, device]));
-
-    return fsSize
-      .filter(fs => fs.size > 0)
-      .map(fs => {
-        const device = devices.get(fs.mount);
-        return {
-          device: fs.fs,
-          type: fs.type,
-          total: fs.size,
-          used: fs.used,
-          free: fs.size - fs.used,
-          percentage: Math.round((fs.used / fs.size) * 100 * 10) / 10,
-          mount: fs.mount,
-          physical: device ? {
-            name: device.name,
-            type: device.type,
-            vendor: device.vendor,
-            size: device.size,
-            protocol: device.protocol
-          } : null
-        };
-      });
-  } catch (error) {
-    console.error('Error getting disk information:', error);
-    return [];
-  }
-}
-
-async function getProcessList() {
-  try {
-    const [processes, users] = await Promise.all([
-      si.processes(),
-      si.users()
-    ]);
-
-    const processUsers = new Map(users.map(user => [user.pid, user.user]));
+    const processes = await si.processes();
+    const users = await si.users();
     const totalMem = os.totalmem();
+    const userMap = new Map(users.map(user => [user.pid, user.user]));
 
-    const allProcesses = processes.list
+    // Rotate through processes
+    processOffset = (processOffset + PROCESS_LIMIT) % Math.max(processes.list.length, PROCESS_LIMIT);
+
+    return processes.list
+      .filter(process => process.cpu > 0.1 || process.memRss > totalMem * 0.001) // Filter out very low resource processes
       .map(process => ({
         pid: process.pid,
         name: process.name,
-        cpu: Math.round(process.cpu * 10) / 10 || 0,
-        memory: Math.round((process.memRss / totalMem) * 100 * 10) / 10,
-        memoryRaw: process.memRss,
+        cpu: Math.min(process.cpu || 0, 100),
+        memory: process.memRss ? Math.min((process.memRss / totalMem) * 100, 100) : 0,
+        memoryRaw: process.memRss || 0,
         status: process.state || 'unknown',
         started: process.started,
-        user: processUsers.get(process.pid) || process.user || 'system',
+        user: userMap.get(process.pid) || process.user || 'system',
         command: process.command || '',
         path: process.path || ''
       }))
       .sort((a, b) => b.cpu - a.cpu || b.memory - a.memory)
-      .slice(0, 10); // Always show top 10 processes
-
-    return allProcesses;
+      .slice(processOffset, processOffset + PROCESS_LIMIT);
   } catch (error) {
     console.error('Error getting process list:', error);
     return [];
   }
 }
 
-async function getCpuUsage() {
-  try {
-    const [load, temp, speed] = await Promise.all([
-      si.currentLoad(),
-      si.cpuTemperature(),
-      si.cpuCurrentSpeed()
-    ]);
-
-    return {
-      cores: os.cpus().length,
-      threads: os.cpus().length,
-      usage: load.cpus.map(core => Math.min(core.load, 100)),
-      threadUsage: load.cpus.map(core => Math.min(core.load, 100)),
-      averageUsage: Math.min(load.currentLoad, 100),
-      temperature: temp.main,
-      speed: speed.avg
-    };
-  } catch (error) {
-    console.error('Error getting CPU usage:', error);
-    return {
-      cores: 0,
-      threads: 0,
-      usage: [],
-      threadUsage: [],
-      averageUsage: 0,
-      temperature: null,
-      speed: 0
-    };
-  }
-}
-
-async function getSystemMetrics(force = false) {
+async function getMetrics(force = false) {
   const now = Date.now();
   
   if (!force && metricsCache && (now - metricsCacheTime) < CACHE_DURATION) {
@@ -181,70 +131,90 @@ async function getSystemMetrics(force = false) {
   }
 
   try {
-    const [memData, cpuData, processes, disks, time] = await Promise.all([
+    const [currentLoad, memory, fsSize, time, cpuTemp] = await Promise.all([
+      si.currentLoad(),
       si.mem(),
-      getCpuUsage(),
-      getProcessList(),
-      getDiskInfo(),
-      si.time()
+      si.fsSize(),
+      si.time(),
+      si.cpuTemperature()
     ]);
+
+    const processes = await getProcesses();
 
     const metrics = {
       timestamp: now,
       bootTime: time.boottime * 1000,
       memory: {
-        total: memData.total,
-        free: memData.available,
-        used: memData.active,
-        percentage: Math.min((memData.active / memData.total) * 100, 100),
+        total: memory.total,
+        free: memory.available,
+        used: memory.active,
+        percentage: Math.min((memory.active / memory.total) * 100, 100),
         swap: {
-          total: memData.swaptotal,
-          used: memData.swapused,
-          free: memData.swapfree,
-          percentage: memData.swaptotal ? Math.min((memData.swapused / memData.swaptotal) * 100, 100) : 0
+          total: memory.swaptotal,
+          used: memory.swapused,
+          free: memory.swapfree,
+          percentage: memory.swaptotal ? 
+            Math.min((memory.swapused / memory.swaptotal) * 100, 100) : 0
         }
       },
-      cpu: cpuData,
+      cpu: {
+        cores: os.cpus().length,
+        threads: os.cpus().length,
+        usage: currentLoad.cpus.map(cpu => Math.min(cpu.load, 100)),
+        threadUsage: currentLoad.cpus.map(cpu => Math.min(cpu.load, 100)),
+        averageUsage: Math.min(currentLoad.currentLoad, 100),
+        temperature: cpuTemp.main || null,
+        speed: os.cpus()[0].speed
+      },
       loadAverage: os.loadavg(),
       uptime: os.uptime(),
       processes,
-      disk: disks
+      disk: fsSize
+        .filter(fs => fs.size > 0)
+        .map(fs => ({
+          device: fs.fs,
+          type: fs.type,
+          total: fs.size,
+          used: fs.used,
+          free: fs.size - fs.used,
+          percentage: Math.min((fs.used / fs.size) * 100, 100),
+          mount: fs.mount
+        }))
     };
 
     metricsCache = metrics;
     metricsCacheTime = now;
-
     return metrics;
   } catch (error) {
-    console.error('Error getting system metrics:', error);
+    console.error('Error getting metrics:', error);
     return metricsCache || null;
   }
 }
 
 io.on('connection', async (socket) => {
   console.log('Client connected');
+  activeConnections.add(socket.id);
   let metricsInterval;
 
   try {
-    // Send initial system information
     const sysInfo = await getSystemInfo();
     if (sysInfo) {
       socket.emit('systemInfo', sysInfo);
     }
 
-    // Send initial metrics
-    const initialMetrics = await getSystemMetrics(true);
+    const initialMetrics = await getMetrics(true);
     if (initialMetrics) {
       socket.emit('metrics', initialMetrics);
     }
 
-    // Update metrics every 2 seconds
     metricsInterval = setInterval(async () => {
-      const metrics = await getSystemMetrics();
-      if (metrics) {
-        socket.emit('metrics', metrics);
+      if (socket.connected && activeConnections.has(socket.id)) {
+        const metrics = await getMetrics();
+        if (metrics) {
+          socket.emit('metrics', metrics);
+        }
       }
-    }, 2000);
+    }, METRIC_INTERVAL);
 
   } catch (error) {
     console.error('Error in socket connection:', error);
@@ -252,54 +222,65 @@ io.on('connection', async (socket) => {
 
   socket.on('disconnect', () => {
     console.log('Client disconnected');
+    activeConnections.delete(socket.id);
+    if (metricsInterval) {
+      clearInterval(metricsInterval);
+    }
+  });
+
+  socket.on('error', (error) => {
+    console.error('Socket error:', error);
+    activeConnections.delete(socket.id);
     if (metricsInterval) {
       clearInterval(metricsInterval);
     }
   });
 });
 
-// Process termination endpoint
 app.delete('/process/:pid', async (req, res) => {
   res.header('Access-Control-Allow-Origin', 'http://localhost:5173');
   res.header('Access-Control-Allow-Methods', 'GET, POST, DELETE, OPTIONS');
-  res.header('Access-Control-Allow-Headers', 'Content-Type');
+  res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization');
 
   if (req.method === 'OPTIONS') {
     return res.status(200).end();
   }
 
-  try {
-    const pid = parseInt(req.params.pid);
-    if (isNaN(pid)) {
-      return res.status(400).json({ error: 'Invalid PID' });
-    }
+  const pid = parseInt(req.params.pid);
+  if (isNaN(pid)) {
+    return res.status(400).json({ error: 'Invalid PID' });
+  }
 
-    try {
-      process.kill(pid, 0);
-    } catch (e) {
+  try {
+    // Check if process exists
+    const running = await isProcessRunning(pid);
+    if (!running) {
       return res.status(404).json({ error: 'Process not found' });
     }
 
-    try {
-      process.kill(pid, 'SIGTERM');
-      
-      setTimeout(() => {
-        try {
-          process.kill(pid, 0);
-          process.kill(pid, 'SIGKILL');
-        } catch (e) {
-          // Process already terminated
-        }
-      }, 500);
+    // Try SIGTERM first
+    process.kill(pid, 'SIGTERM');
 
-      res.json({ success: true });
-    } catch (error) {
-      console.error('Error terminating process:', error);
-      res.status(500).json({ error: 'Failed to terminate process' });
-    }
+    // Wait for process to terminate gracefully
+    setTimeout(async () => {
+      try {
+        const stillRunning = await isProcessRunning(pid);
+        if (stillRunning) {
+          // Force kill if still running
+          process.kill(pid, 'SIGKILL');
+        }
+      } catch (e) {
+        // Process already terminated
+      }
+    }, 1000);
+
+    res.json({ success: true });
   } catch (error) {
-    console.error('Error in process termination:', error);
-    res.status(500).json({ error: 'Internal server error' });
+    if (error.code === 'EPERM') {
+      return res.status(403).json({ error: 'Permission denied to terminate process' });
+    }
+    console.error('Error terminating process:', error);
+    res.status(500).json({ error: 'Failed to terminate process' });
   }
 });
 

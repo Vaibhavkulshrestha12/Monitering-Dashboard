@@ -1,6 +1,6 @@
 import { CircularMetric } from '../components/CircularMetric';
 import { CpuThreads } from '../components/CpuThreads';
-//import { PerformanceGraph } from '../components/PerformanceGraph';
+import { PerformanceGraph } from '../components/PerformanceGraph';
 import { SystemInfo } from '../components/SystemInfo';
 import { usePerformanceMetrics } from '../hooks/usePerformanceMetrics';
 import { Area, AreaChart, ResponsiveContainer, XAxis, YAxis, Tooltip } from 'recharts';

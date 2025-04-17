@@ -1,6 +1,6 @@
 import { HardDrive } from 'lucide-react';
 import { usePerformanceMetrics } from '../hooks/usePerformanceMetrics';
-//import { Area, AreaChart, ResponsiveContainer, XAxis, YAxis, Tooltip } from 'recharts';
+import { Area, AreaChart, ResponsiveContainer, XAxis, YAxis, Tooltip } from 'recharts';
 
 interface DiskUsageProps {
   darkMode: boolean;
