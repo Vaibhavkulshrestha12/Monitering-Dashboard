@@ -10,13 +10,7 @@ This project is built on the Vite build with a React TSX template. It uses the `
 - Built with Vite and React TSX
 - Uses WebSocket for real-time updates
 
-## Preview
 
-![Dashboard Preview](coming soon!)
-
-## Getting Started
-
-Follow these steps to clone and run the project:
 
 ### Prerequisites
 
